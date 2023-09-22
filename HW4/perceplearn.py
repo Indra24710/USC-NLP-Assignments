@@ -1,0 +1,263 @@
+import numpy as np
+import pandas as pd
+import nltk
+nltk.download('wordnet')
+from nltk.corpus import stopwords
+nltk.download("stopwords")
+nltk.download('punkt')
+import re
+from nltk.stem import PorterStemmer
+ps = PorterStemmer()
+from nltk.stem import WordNetLemmatizer
+nltk.download('omw-1.4')
+import json
+
+
+lemmatizer = WordNetLemmatizer()
+
+def preprocess_data(new_df):
+    remove_html_tags='<.*?>';
+    remove_urls='http\S+';
+    remove_non_alpha='[^A-Za-z ]'
+    remove_extra_space=' +'
+    processed=[]
+    new_df=list(new_df)
+    for i in range(len(new_df)):
+        s=str(new_df[i])
+        if s=="":
+            continue
+        s=re.sub(remove_html_tags,"",s)
+        s=re.sub(remove_urls,"",s)
+        s=re.sub(remove_non_alpha,"",s)
+        s=re.sub(remove_extra_space," ",s)
+        if s=="":
+            continue
+        processed.append(s)
+        
+        
+    stop_words = set(stopwords.words('english'))
+    final_processed_text=[]
+    
+    for i in range(len(processed)):
+        s=processed[i]
+        s=s.split(" ")
+        s=[lemmatizer.lemmatize(word) for word in s if word not in stop_words]
+        final_processed_text.append(s)
+        
+    return final_processed_text
+
+
+class DataLoader:
+    
+    def __init__(self):
+        
+        self.wordmap={}
+        self.wordcount=0
+        self.occurences={}
+        self.total_sentences=0
+    
+    def create(self,data):
+        
+        for sentence in data:
+            
+            for i in sentence+["end"]:
+                i=i.lower()
+                
+                if i not in self.wordmap:
+                    self.wordmap[i]=[self.wordcount,0]
+                    self.wordcount+=1
+                self.wordmap[i][1]+=1
+    
+    def get_term_frequency(self,sentence,word):
+        
+        sentence=[i.lower() for i in sentence]
+        return sentence.count(word)/len(sentence)
+        
+                    
+                
+    def get_inverse_document_frequency(self,word):
+        inv_doc_freq=np.log(self.total_sentences/self.wordmap[word][1])
+        return inv_doc_freq
+                
+    def get_embeddings(self,sentence):
+        
+
+        temp=[0]*self.wordcount
+        for i in sentence:
+            i=i.lower()
+            if i in self.wordmap:
+                temp[self.wordmap[i][0]]=self.get_term_frequency(sentence,i)*self.get_inverse_document_frequency(i)
+        
+        return temp
+
+def get_word2vec_embeddings(Xtrain,Xtest,fixedsize=0,dataloader=None):
+    Xtrain_embeddings=[]
+    Xtest_embeddings=[]
+    
+
+    for i in Xtrain:
+        Xtrain_embeddings.append(dataloader.get_embeddings(i))
+        
+    for i in Xtest:
+            
+        Xtest_embeddings.append(dataloader.get_embeddings(i))
+    
+    
+    return Xtrain_embeddings,Xtest_embeddings
+
+
+class Node:
+    
+    def __init__(self,w_size=1000,bias=0):
+        
+        self.w=np.asarray([0]*w_size)
+        self.bias=bias
+    
+    def __init__(self,w_size=1000,bias=0,avg=True):
+        self.w=np.asarray([0]*w_size)
+        self.bias=bias
+        self.cw=np.asarray([0]*w_size)
+        self.cbias=bias
+        
+class Perceptron:
+    def __init__(self,model_type='vanilla',emb_size=4500,bias=0,n=2):
+        self.emb_size=emb_size
+        self.model_type=model_type
+        self.perceptrons=[Node(emb_size,bias),Node(emb_size,bias,True)]
+        
+        
+    def forward(self,inp):
+        out=[]
+        for i in range(len(self.perceptrons)):
+            prod=np.dot(inp,self.perceptrons[i].w)
+            s=prod+self.perceptrons[i].bias
+            out.append(s)
+        return out
+    
+    def train(self,data,label1,label2):
+
+        if self.model_type=='vanilla':
+
+            for inp,lab1,lab2 in zip(data,label1,label2):
+                out=self.forward(np.asarray(inp))
+                lab=[lab1,lab2]
+                for i in range(len(out)):
+                    if out[i]*lab[i]<=0:
+                        self.perceptrons[i].w=self.perceptrons[i].w+inp*lab[i]
+                        self.perceptrons[i].bias=self.perceptrons[i].bias+lab[i]
+        else:
+            counter=0
+            for inp,lab1,lab2 in zip(data,label1,label2):
+                out=self.forward(np.asarray(inp))
+                lab=[lab1,lab2]
+                if out[0]*lab[0]<=0:
+                    
+                    self.perceptrons[0].w=self.perceptrons[0].w+inp*lab[0]
+                    
+                    self.perceptrons[0].bias=self.perceptrons[0].bias+lab[0]
+                    
+#                     self.perceptrons[0].cw=self.perceptrons[0].cw+lab[0]*counter*inp
+                    
+#                     self.perceptrons[0].cbias=self.perceptrons[0].cbias+lab[0]*counter
+                    self.perceptrons[0].cw=self.perceptrons[0].cw+self.perceptrons[0].w
+                    
+                    self.perceptrons[0].cbias=self.perceptrons[0].cbias+self.perceptrons[0].bias
+                    
+                    
+                
+                if out[1]*lab[1]<=0:
+                    
+                    self.perceptrons[1].w=self.perceptrons[1].w+inp*lab[1]
+                    
+                    self.perceptrons[1].bias=self.perceptrons[1].bias+lab[1]
+                    
+#                     self.perceptrons[1].cw=self.perceptrons[1].cw+lab[1]*counter*inp
+                    
+#                     self.perceptrons[1].cbias=self.perceptrons[1].cbias+lab[1]*counter
+                    
+                    self.perceptrons[1].cw=self.perceptrons[1].cw+self.perceptrons[1].w
+                    
+                    self.perceptrons[1].cbias=self.perceptrons[1].cbias+self.perceptrons[1].bias
+                    
+                counter+=1
+
+            self.perceptrons[0].w=(1/counter)*self.perceptrons[0].cw
+            
+            self.perceptrons[0].bias=(1/counter)*self.perceptrons[0].cbias
+            
+            self.perceptrons[1].w=(1/counter)*self.perceptrons[1].cw
+            
+            self.perceptrons[1].bias=(1/counter)*self.perceptrons[1].cbias
+
+             
+                        
+    def predict(self,data):
+        out=[]
+        for i in data:
+            out.append(self.forward(i))
+        pred1=[]
+        pred2=[]
+        for i in out:
+            temp=[1,1]
+            if i[0]<0:
+                temp[0]=-1
+            if i[1]<0:
+                temp[1]=-1
+            pred1.append(temp[0])
+            pred2.append(temp[1])
+        return pred1,pred2
+
+
+
+f=open("./data/train-labeled.txt",'r')
+
+hashmap={"id":[],"label1":[],"label2":[],"text":[]}
+for i in f.readlines():
+    data=i.split(" ")
+    hashmap["id"].append(data[0])
+    hashmap["label1"].append(data[1])
+    hashmap["label2"].append(data[2])
+    hashmap["text"].append(" ".join(data[3:]).rstrip())
+df=pd.DataFrame(hashmap)
+df['text']=preprocess_data(df['text'])
+
+
+dataloader=DataLoader()
+dataloader.create(df['text'])
+dataloader.total_sentences=len(df['text'])
+train_df=df.sample(frac=1)
+Xtrain,ytrain1,ytrain2=train_df['text'],train_df['label1'],train_df['label2']
+Xtrain_emb,_=get_word2vec_embeddings(Xtrain,Xtrain,fixedsize=200,dataloader=dataloader)
+Xtrain_emb=np.asarray(Xtrain_emb)
+classmap={"Fake":-1,"Neg":-1,"Pos":1,"True":1}
+ytrain1=[classmap[i] for i in ytrain1]
+ytrain2=[classmap[i] for i in ytrain2]
+
+
+
+p1=Perceptron(emb_size=dataloader.wordcount)
+
+epoch_count=500
+
+for i in range(epoch_count):
+    
+    p1.train(Xtrain_emb,ytrain1,ytrain2)
+
+
+p2=Perceptron(emb_size=dataloader.wordcount,model_type='average')
+
+epoch_count=500
+
+for i in range(epoch_count):
+
+    p2.train(Xtrain_emb,ytrain1,ytrain2)
+
+    
+vanillamodel={"wordmap":dataloader.wordmap,"wordcount":dataloader.wordcount,"total_sentences":dataloader.total_sentences,"weights_class_1":list(p1.perceptrons[0].w),"bias_class_1":p1.perceptrons[0].bias,"weights_class_2":list(p1.perceptrons[1].w),"bias_class_2":p1.perceptrons[1].bias}
+averagemodel={"wordmap":dataloader.wordmap,"wordcount":dataloader.wordcount,"total_sentences":dataloader.total_sentences,"weights_class_1":list(p2.perceptrons[0].w),"bias_class_1":p2.perceptrons[0].bias,"weights_class_2":list(p2.perceptrons[1].w),"bias_class_2":p2.perceptrons[1].bias}
+
+with open('vanillamodel.txt','w',encoding='utf-8') as file:
+    json.dump(vanillamodel,file,ensure_ascii=False)
+
+with open('averagemodel.txt','w',encoding='utf-8') as file:
+    json.dump(averagemodel,file,ensure_ascii=False)
